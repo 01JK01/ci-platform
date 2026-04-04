@@ -1,7 +1,7 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { BarChart, Bar, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell,
-  LineChart, Line, PieChart, Pie } from "recharts";
+  LineChart, Line, PieChart, Pie, ScatterChart, Scatter, ZAxis, ReferenceLine } from "recharts";
 
 const D = {
   page: "#F0ECF9",white: "#FFFFFF",navBg: "#6D28D9",navActive: "#5B21B6",
@@ -14,14 +14,35 @@ const D = {
   textFaint: "#D1D5DB",shadow: "0 1px 8px rgba(109,40,217,0.08)",
   shadowMd: "0 4px 20px rgba(109,40,217,0.12)",shadowLg: "0 8px 32px rgba(109,40,217,0.18)",
   chart: ["#7C3AED","#EC4899","#06B6D4","#F59E0B","#10B981","#EF4444","#4F46E5","#F97316"],
+  score:{excellent:"#10B981",good:"#7C3AED",average:"#F59E0B",poor:"#EF4444"},
 };
 const cc = i => D.chart[i % D.chart.length];
+
+/* ── v10 Utilities ── */
+const exportCSV = (filename, headers, rows) => {
+  const csv = [headers.join(","), ...rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(","))].join("\n");
+  const blob = new Blob([csv], {type:"text/csv"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href=url; a.download=filename; a.click();
+  URL.revokeObjectURL(url);
+};
+const trendIndicator = s => s>=80?"↑":s>=60?"→":"↓";
+const trendCol = s => s>=80?D.green:s>=60?D.yellow:D.red;
+
+/* ── Navigation Groups (v10) ── */
+const NAV_GROUPS = [
+  {id:"overview",label:"Overview",icon:"📊",tabs:["cmd","how"]},
+  {id:"channels",label:"Channels",icon:"📡",tabs:["seo","cnt","soc"]},
+  {id:"strategy",label:"Strategy",icon:"⚙️",tabs:["mkt","cam"]},
+  {id:"intelligence",label:"Intelligence",icon:"🧠",tabs:["gap","trn","rep"]},
+  {id:"tools",label:"Tools",icon:"🔧",tabs:["scr","pro"]},
+];
 
 const GS = () => (
   <style>{`
     @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Mulish:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap');
     *{box-sizing:border-box;margin:0;padding:0;}
-    html,body{background:${D.page};font-family:'Mulish',sans-serif;color:${D.text};}
+    html,body{background:${D.page};font-family:'Mulish',sans-serif;color:${D.text};font-size:14px;}
     ::-webkit-scrollbar{width:5px;height:5px;}::-webkit-scrollbar-track{background:${D.border};}
     ::-webkit-scrollbar-thumb{background:${D.purpleMid};border-radius:4px;}
     button,select,input{font-family:'Mulish',sans-serif;outline:none;}
@@ -32,6 +53,19 @@ const GS = () => (
     input[type=range]{-webkit-appearance:none;height:4px;border-radius:2px;background:${D.border};outline:none;width:100%;}
     input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:${D.purple};cursor:pointer;}
     .pill-btn{transition:all .14s;cursor:pointer;}.pill-btn:hover{opacity:.85;}
+    .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0;}
+    @media(max-width:1024px){
+      .nav-tabs{flex-wrap:wrap!important;}
+      .main-grid-4{grid-template-columns:repeat(2,1fr)!important;}
+      .main-grid-5{grid-template-columns:repeat(2,1fr)!important;}
+      .main-grid-2col{grid-template-columns:1fr!important;}
+    }
+    @media(max-width:768px){
+      .main-grid-4{grid-template-columns:1fr!important;}
+      .main-grid-5{grid-template-columns:1fr!important;}
+      .main-grid-2col{grid-template-columns:1fr!important;}
+      .nav-groups{flex-wrap:wrap!important;}
+    }
   `}</style>
 );
 
@@ -41,12 +75,12 @@ const Card = ({children,style={},...p}) => (
 );
 const Pill = ({children,col=D.purple,bg,style={}}) => (
   <span style={{display:"inline-flex",alignItems:"center",padding:"3px 10px",borderRadius:99,
-    background:bg||col+"18",color:col,fontSize:11,fontWeight:700,letterSpacing:".02em",
+    background:bg||col+"18",color:col,fontSize:13,fontWeight:700,letterSpacing:".02em",
     whiteSpace:"nowrap",...style}}>{children}</span>
 );
 const Est = () => (
-  <span style={{fontSize:9,color:D.textLight,fontWeight:600,letterSpacing:".04em",
-    background:D.border,borderRadius:4,padding:"1px 5px",marginLeft:4}}>EST</span>
+  <span style={{fontSize:11,color:D.textLight,fontWeight:600,letterSpacing:".04em",
+    background:D.border,borderRadius:4,padding:"1px 5px",marginLeft:4}} aria-label="Estimated data">EST</span>
 );
 const ScoreBadge = ({val,size=13}) => {
   const col = val>=85?D.green:val>=70?D.purple:val>=55?D.yellow:D.red;
@@ -69,14 +103,14 @@ const SectionHead = ({title,sub,action}) => (
   </div>
 );
 const KpiCard = ({label,value,sub,icon,col=D.purple,bg,style={}}) => (
-  <Card style={{padding:18,...style}}>
+  <Card style={{padding:18,...style}} role="region" aria-label={label}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
-      <span style={{fontSize:11,fontWeight:700,color:D.textMid,textTransform:"uppercase",letterSpacing:".06em"}}>{label}</span>
+      <span style={{fontSize:13,fontWeight:700,color:D.textMid,textTransform:"uppercase",letterSpacing:".06em"}}>{label}</span>
       <div style={{width:32,height:32,borderRadius:10,background:bg||col+"18",
-        display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{icon}</div>
+        display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}} aria-hidden="true">{icon}</div>
     </div>
     <div style={{fontFamily:"Outfit",fontWeight:800,fontSize:28,color:col,lineHeight:1,marginBottom:4}}>{value}</div>
-    {sub && <div style={{fontSize:11,color:D.textLight}}>{sub}</div>}
+    {sub && <div style={{fontSize:13,color:D.textLight}}>{sub}</div>}
   </Card>
 );
 const CTip = ({active,payload,label}) => {
@@ -242,7 +276,7 @@ const SEO_POSITIONS = {
 COMPANIES.forEach(c=>{if(!SEO_POSITIONS[c.id])SEO_POSITIONS[c.id]=[];});
 const intentColors = {Brand:D.purple,Informational:D.teal,Commercial:D.pink,Transactional:D.green};
 
-function CommandCenter({data,weights}) {
+function CommandCenter({data,weights,compareMode=false,compareIds=[],toggleCompare,viewMode="chart"}) {
   const [showMeth,setShowMeth] = useState(false);
   const scored = useMemo(()=>[...data].map(c=>({...c,overall:overallScore(c,weights)})).sort((a,b)=>b.overall-a.overall),[data,weights]);
   const msim = scored.find(c=>c.isHome);
@@ -312,19 +346,24 @@ function CommandCenter({data,weights}) {
         </div>
       </Card>
       <Card>
-        <SectionHead title="Full Competitive Matrix" sub="All 18 firms, all 5 dimensions"/>
+        <SectionHead title="Full Competitive Matrix" sub="All 18 firms, all 5 dimensions — with trend indicators"/>
         <div style={{overflowX:"auto"}}>
-          <table style={{width:"100%",borderCollapse:"collapse"}}>
-            <thead><tr style={{background:D.cardAlt}}>{["#","Firm","AUM","SEO","Content","Social","Martech","Campaign","Overall"].map(h=>(<th key={h} style={{padding:"9px 12px",textAlign:"left",fontSize:10,fontWeight:700,color:D.textLight,textTransform:"uppercase",letterSpacing:".06em",borderBottom:`1px solid ${D.border}`}}>{h}</th>))}</tr></thead>
+          <table style={{width:"100%",borderCollapse:"collapse"}} role="table" aria-label="Competitive matrix">
+            <thead><tr style={{background:D.cardAlt}}>{[...(compareMode?["⇔"]:[]),"#","Firm","AUM","SEO","Content","Social","Martech","Campaign","Overall","Trend"].map(h=>(<th key={h} style={{padding:"9px 12px",textAlign:"left",fontSize:13,fontWeight:700,color:D.textLight,textTransform:"uppercase",letterSpacing:".06em",borderBottom:`1px solid ${D.border}`}}>{h}</th>))}</tr></thead>
             <tbody>{scored.map((c,i)=>{const scores=[seoScore(c),contentScore(c),socialScore(c),martechScore(c),campaignScore(c)];return(
-              <tr key={c.id} className="hrow" style={{background:c.isHome?"#FFFBF0":"white"}}>
-                <td style={{padding:"8px 12px",borderBottom:`1px solid ${D.border}`,fontSize:11,color:D.textLight,fontFamily:"JetBrains Mono"}}>{i+1}</td>
+              <tr key={c.id} className="hrow" style={{background:c.isHome?"#FFFBF0":compareIds?.includes(c.id)?"#F0FDF4":"white"}}>
+                {compareMode&&<td style={{padding:"8px 12px",borderBottom:`1px solid ${D.border}`}}>
+                  <input type="checkbox" checked={compareIds?.includes(c.id)||false} onChange={()=>toggleCompare?.(c.id)}
+                    aria-label={`Compare ${c.name}`} style={{width:16,height:16,cursor:"pointer",accentColor:D.green}}/>
+                </td>}
+                <td style={{padding:"8px 12px",borderBottom:`1px solid ${D.border}`,fontSize:13,color:D.textLight,fontFamily:"JetBrains Mono"}}>{i+1}</td>
                 <td style={{padding:"8px 12px",borderBottom:`1px solid ${D.border}`}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8}}><div style={{width:8,height:8,borderRadius:"50%",background:c.col,flexShrink:0}}/><span style={{fontSize:12,fontWeight:c.isHome?700:500,color:c.isHome?D.yellow:D.text}}>{c.name}{c.isHome?" ★":""}</span></div>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}><div style={{width:8,height:8,borderRadius:"50%",background:c.col,flexShrink:0}}/><span style={{fontSize:14,fontWeight:c.isHome?700:500,color:c.isHome?D.yellow:D.text}}>{c.name}{c.isHome?" ★":""}</span></div>
                 </td>
-                <td style={{padding:"8px 12px",borderBottom:`1px solid ${D.border}`,fontSize:11,color:D.textMid,fontFamily:"JetBrains Mono"}}>{c.aum}</td>
-                {scores.map((s,j)=>(<td key={j} style={{padding:"8px 12px",borderBottom:`1px solid ${D.border}`}}><div style={{width:28,height:28,borderRadius:8,background:scoreBg(s),display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontFamily:"JetBrains Mono",fontWeight:700,fontSize:10,color:scoreCol(s)}}>{s}</span></div></td>))}
+                <td style={{padding:"8px 12px",borderBottom:`1px solid ${D.border}`,fontSize:13,color:D.textMid,fontFamily:"JetBrains Mono"}}>{c.aum}</td>
+                {scores.map((s,j)=>(<td key={j} style={{padding:"8px 12px",borderBottom:`1px solid ${D.border}`}}><div style={{width:28,height:28,borderRadius:8,background:scoreBg(s),display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontFamily:"JetBrains Mono",fontWeight:700,fontSize:13,color:scoreCol(s)}}>{s}</span></div></td>))}
                 <td style={{padding:"8px 12px",borderBottom:`1px solid ${D.border}`}}><ScoreBadge val={c.overall}/></td>
+                <td style={{padding:"8px 12px",borderBottom:`1px solid ${D.border}`,fontSize:16,color:trendCol(c.overall)}} aria-label={`Trend: ${trendIndicator(c.overall)==="↑"?"up":trendIndicator(c.overall)==="→"?"stable":"down"}`}>{trendIndicator(c.overall)}</td>
               </tr>
             );})}
             </tbody>
@@ -387,13 +426,14 @@ function SEOTab({data}) {
             )}
           </Card>
           <Card>
-            <SectionHead title="SEO Score — All 18 Firms" sub="Composite SEO score ranking"/>
+            <SectionHead title="SEO Score — All 18 Firms" sub="Composite SEO score ranking · dashed line = industry average"/>
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={barData} layout="vertical" margin={{left:0,right:36}}>
                 <CartesianGrid strokeDasharray="3 3" stroke={D.border} horizontal={false}/>
-                <XAxis type="number" domain={[0,100]} tick={{fontSize:10,fill:D.textLight}} tickLine={false} axisLine={false}/>
-                <YAxis type="category" dataKey="name" tick={{fontSize:10,fill:D.textMid,fontFamily:"JetBrains Mono"}} tickLine={false} axisLine={false} width={32}/>
+                <XAxis type="number" domain={[0,100]} tick={{fontSize:13,fill:D.textLight}} tickLine={false} axisLine={false}/>
+                <YAxis type="category" dataKey="name" tick={{fontSize:13,fill:D.textMid,fontFamily:"JetBrains Mono"}} tickLine={false} axisLine={false} width={32}/>
                 <Tooltip content={<CTip/>}/>
+                <ReferenceLine x={Math.round(barData.reduce((s,d)=>s+d.score,0)/barData.length)} stroke={D.textLight} strokeDasharray="4 4" label={{value:"Avg",position:"top",fontSize:11,fill:D.textLight}}/>
                 <Bar dataKey="score" name="SEO Score" radius={[0,6,6,0]}>{barData.map((d,i)=><Cell key={i} fill={d.home?D.yellow:scoreCol(d.score)} opacity={.9}/>)}</Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -464,8 +504,8 @@ function ContentTab({data}) {
         <ResponsiveContainer width="100%" height={260}>
           <BarChart data={qualData} margin={{bottom:5}}>
             <CartesianGrid strokeDasharray="3 3" stroke={D.border} vertical={false}/>
-            <XAxis dataKey="name" tick={{fontSize:9,fill:D.textMid,fontFamily:"JetBrains Mono"}} tickLine={false} axisLine={false}/>
-            <YAxis domain={[0,100]} tick={{fontSize:9,fill:D.textLight}} tickLine={false} axisLine={false}/>
+            <XAxis dataKey="name" tick={{fontSize:11,fill:D.textMid,fontFamily:"JetBrains Mono"}} tickLine={false} axisLine={false}/>
+            <YAxis domain={[0,100]} tick={{fontSize:11,fill:D.textLight}} tickLine={false} axisLine={false}/>
             <Tooltip content={<CTip/>}/><Legend wrapperStyle={{fontSize:11,color:D.textMid}}/>
             <Bar dataKey="Q" name="Quality" fill={D.purple} radius={[3,3,0,0]} opacity={.9}/>
             <Bar dataKey="TL" name="Thought Leadership" fill={D.pink} radius={[3,3,0,0]} opacity={.9}/>
@@ -525,8 +565,8 @@ function SocialTab({data}) {
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={liData} layout="vertical" margin={{left:0,right:30}}>
               <CartesianGrid strokeDasharray="3 3" stroke={D.border} horizontal={false}/>
-              <XAxis type="number" tick={{fontSize:9,fill:D.textLight}} tickLine={false} axisLine={false}/>
-              <YAxis type="category" dataKey="name" tick={{fontSize:9,fill:D.textMid,fontFamily:"JetBrains Mono"}} tickLine={false} axisLine={false} width={32}/>
+              <XAxis type="number" tick={{fontSize:11,fill:D.textLight}} tickLine={false} axisLine={false}/>
+              <YAxis type="category" dataKey="name" tick={{fontSize:11,fill:D.textMid,fontFamily:"JetBrains Mono"}} tickLine={false} axisLine={false} width={32}/>
               <Tooltip content={<CTip/>}/>
               <Bar dataKey="followers" name="Followers (K)" radius={[0,4,4,0]}>
                 {liData.map((d,i)=><Cell key={i} fill={d.home?D.yellow:D.indigo} opacity={.85}/>)}
@@ -539,8 +579,8 @@ function SocialTab({data}) {
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={engData} layout="vertical" margin={{left:0,right:40}}>
               <CartesianGrid strokeDasharray="3 3" stroke={D.border} horizontal={false}/>
-              <XAxis type="number" tick={{fontSize:9,fill:D.textLight}} tickLine={false} axisLine={false}/>
-              <YAxis type="category" dataKey="name" tick={{fontSize:9,fill:D.textMid,fontFamily:"JetBrains Mono"}} tickLine={false} axisLine={false} width={32}/>
+              <XAxis type="number" tick={{fontSize:11,fill:D.textLight}} tickLine={false} axisLine={false}/>
+              <YAxis type="category" dataKey="name" tick={{fontSize:11,fill:D.textMid,fontFamily:"JetBrains Mono"}} tickLine={false} axisLine={false} width={32}/>
               <Tooltip content={<CTip/>}/>
               <Bar dataKey="val" name="Engagement %" radius={[0,4,4,0]}>
                 {engData.map((d,i)=><Cell key={i} fill={d.home?D.yellow:D.green} opacity={.85}/>)}
@@ -556,8 +596,8 @@ function SocialTab({data}) {
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={freqData} layout="vertical" margin={{left:0,right:30}}>
               <CartesianGrid strokeDasharray="3 3" stroke={D.border} horizontal={false}/>
-              <XAxis type="number" tick={{fontSize:9,fill:D.textLight}} tickLine={false} axisLine={false}/>
-              <YAxis type="category" dataKey="name" tick={{fontSize:9,fill:D.textMid,fontFamily:"JetBrains Mono"}} tickLine={false} axisLine={false} width={32}/>
+              <XAxis type="number" tick={{fontSize:11,fill:D.textLight}} tickLine={false} axisLine={false}/>
+              <YAxis type="category" dataKey="name" tick={{fontSize:11,fill:D.textMid,fontFamily:"JetBrains Mono"}} tickLine={false} axisLine={false} width={32}/>
               <Tooltip content={<CTip/>}/>
               <Bar dataKey="val" name="Posts/Week" radius={[0,4,4,0]}>
                 {freqData.map((d,i)=><Cell key={i} fill={d.home?D.yellow:D.pink} opacity={.85}/>)}
@@ -704,8 +744,8 @@ function MartechTab({data}) {
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={scData} margin={{bottom:5}}>
                 <CartesianGrid strokeDasharray="3 3" stroke={D.border} vertical={false}/>
-                <XAxis dataKey="name" tick={{fontSize:9,fill:D.textMid,fontFamily:"JetBrains Mono"}} tickLine={false} axisLine={false}/>
-                <YAxis domain={[0,100]} tick={{fontSize:9,fill:D.textLight}} tickLine={false} axisLine={false}/>
+                <XAxis dataKey="name" tick={{fontSize:11,fill:D.textMid,fontFamily:"JetBrains Mono"}} tickLine={false} axisLine={false}/>
+                <YAxis domain={[0,100]} tick={{fontSize:11,fill:D.textLight}} tickLine={false} axisLine={false}/>
                 <Tooltip content={<CTip/>}/>
                 <Legend wrapperStyle={{fontSize:11}}/>
                 <Bar dataKey="score" name="Stack Score" fill={D.purple} radius={[3,3,0,0]} opacity={.85}/>
@@ -843,8 +883,8 @@ function CampaignTab({data}) {
         <ResponsiveContainer width="100%" height={240}>
           <BarChart data={[...data].sort((a,b)=>campaignScore(b)-campaignScore(a)).map(c=>({name:c.short,score:campaignScore(c),home:c.isHome}))} layout="vertical" margin={{left:0,right:40}}>
             <CartesianGrid strokeDasharray="3 3" stroke={D.border} horizontal={false}/>
-            <XAxis type="number" domain={[0,100]} tick={{fontSize:9,fill:D.textLight}} tickLine={false} axisLine={false}/>
-            <YAxis type="category" dataKey="name" tick={{fontSize:9,fill:D.textMid,fontFamily:"JetBrains Mono"}} tickLine={false} axisLine={false} width={32}/>
+            <XAxis type="number" domain={[0,100]} tick={{fontSize:11,fill:D.textLight}} tickLine={false} axisLine={false}/>
+            <YAxis type="category" dataKey="name" tick={{fontSize:11,fill:D.textMid,fontFamily:"JetBrains Mono"}} tickLine={false} axisLine={false} width={32}/>
             <Tooltip content={<CTip/>}/>
             <Bar dataKey="score" name="Campaign Score" radius={[0,6,6,0]}>
               {[...data].sort((a,b)=>campaignScore(b)-campaignScore(a)).map((d,i)=><Cell key={i} fill={d.isHome?D.yellow:scoreCol(campaignScore(d))} opacity={.9}/>)}
@@ -960,46 +1000,48 @@ function GapTab({data}) {
           </Card>
         ))}
       </div>
-      {/* Priority effort scatter */}
+      {/* Priority effort scatter — v10: proper Recharts ScatterChart */}
       <Card>
         <SectionHead title="Impact vs. Effort Matrix" sub="Size = priority weight. Upper-left = Quick wins"/>
-        <div style={{position:"relative",height:300,background:D.cardAlt,borderRadius:12,border:`1px solid ${D.border}`,padding:20}}>
-          <div style={{position:"absolute",top:"50%",left:20,transform:"translateY(-50%) rotate(-90deg)",fontSize:10,color:D.textLight,fontWeight:600,letterSpacing:".06em"}}>IMPACT ▲</div>
-          <div style={{position:"absolute",bottom:8,right:"50%",fontSize:10,color:D.textLight,fontWeight:600,letterSpacing:".06em"}}>EFFORT →</div>
-          {/* Quadrant labels */}
-          <div style={{position:"absolute",top:12,left:"60%",fontSize:10,color:D.textLight}}>Low priority</div>
-          <div style={{position:"absolute",top:12,left:40,fontSize:10,color:D.green,fontWeight:700}}>Quick wins</div>
-          <div style={{position:"absolute",bottom:30,left:40,fontSize:10,color:D.textLight}}>Fill later</div>
-          <div style={{position:"absolute",bottom:30,left:"60%",fontSize:10,color:D.purple,fontWeight:700}}>Strategic bets</div>
-          {/* Grid lines */}
-          <div style={{position:"absolute",top:"50%",left:40,right:20,height:1,background:D.border}}/>
-          <div style={{position:"absolute",left:"50%",top:20,bottom:20,width:1,background:D.border}}/>
-          {/* Dots */}
-          {GAPS.map((g,i)=>{
-            const effort=["Low","Medium","High"].indexOf(g.effort);
-            const impact=["Low","Medium","High","Very High"].indexOf(g.impact);
-            const x = 40+(effort/2)*((document.body.clientWidth||400)/2-60);
-            const left = `${15+(effort/2)*70}%`;
-            const top  = `${15+(1-impact/3)*65}%`;
-            const pr   = ["Low","Medium","High","Critical"].indexOf(g.priority);
-            const sz   = 18+(pr*6);
-            return (
-              <div key={i} title={g.category} style={{position:"absolute",left,top,
-                width:sz,height:sz,borderRadius:"50%",background:priorityCols[g.priority]||D.textLight,
-                display:"flex",alignItems:"center",justifyContent:"center",cursor:"default",
-                fontSize:9,color:"white",fontWeight:700,transform:"translate(-50%,-50%)",opacity:.85,
-                boxShadow:`0 2px 8px ${priorityCols[g.priority]||D.textLight}40`,
-                border:"2px solid white",transition:"all .2s",zIndex:i}}>
-                {g.icon}
-              </div>
-            );
-          })}
-        </div>
+        <ResponsiveContainer width="100%" height={340}>
+          <ScatterChart margin={{top:20,right:30,bottom:20,left:30}}>
+            <CartesianGrid strokeDasharray="3 3" stroke={D.border}/>
+            <XAxis type="number" dataKey="effort" name="Effort" domain={[-0.3,2.3]}
+              tick={{fontSize:13,fill:D.textMid}} tickLine={false} axisLine={{stroke:D.border}}
+              tickFormatter={v=>["Low","Medium","High"][v]||""}
+              ticks={[0,1,2]} label={{value:"EFFORT →",position:"bottom",fontSize:13,fill:D.textLight,fontWeight:600}}/>
+            <YAxis type="number" dataKey="impact" name="Impact" domain={[-0.3,3.3]}
+              tick={{fontSize:13,fill:D.textMid}} tickLine={false} axisLine={{stroke:D.border}}
+              tickFormatter={v=>["Low","Medium","High","Very High"][v]||""}
+              ticks={[0,1,2,3]} label={{value:"IMPACT ▲",angle:-90,position:"left",fontSize:13,fill:D.textLight,fontWeight:600}}/>
+            <ZAxis type="number" dataKey="priority" range={[200,800]} name="Priority"/>
+            <Tooltip content={({active,payload})=>{
+              if(!active||!payload?.length) return null;
+              const d=payload[0].payload;
+              return (<div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:10,padding:"8px 12px",boxShadow:D.shadowMd}}>
+                <div style={{fontWeight:700,fontSize:13,color:D.text,marginBottom:4}}>{d.icon} {d.name}</div>
+                <div style={{fontSize:13,color:D.textMid}}>Priority: <span style={{fontWeight:700,color:priorityCols[d.priorityLabel]}}>{d.priorityLabel}</span></div>
+                <div style={{fontSize:13,color:D.textMid}}>Impact: {d.impactLabel} · Effort: {d.effortLabel}</div>
+              </div>);
+            }}/>
+            <ReferenceLine x={1} stroke={D.border} strokeDasharray="3 3"/>
+            <ReferenceLine y={1.5} stroke={D.border} strokeDasharray="3 3"/>
+            <Scatter name="Gaps" data={GAPS.map(g=>({
+              effort:["Low","Medium","High"].indexOf(g.effort),
+              impact:["Low","Medium","High","Very High"].indexOf(g.impact),
+              priority:["Low","Medium","High","Critical"].indexOf(g.priority)+1,
+              name:g.category,icon:g.icon,
+              priorityLabel:g.priority,impactLabel:g.impact,effortLabel:g.effort
+            }))}>
+              {GAPS.map((g,i)=><Cell key={i} fill={priorityCols[g.priority]||D.textLight} opacity={0.85}/>)}
+            </Scatter>
+          </ScatterChart>
+        </ResponsiveContainer>
         <div style={{display:"flex",gap:12,marginTop:10,justifyContent:"center"}}>
           {Object.entries(priorityCols).map(([k,v])=>(
             <div key={k} style={{display:"flex",alignItems:"center",gap:5}}>
               <div style={{width:10,height:10,borderRadius:"50%",background:v}}/>
-              <span style={{fontSize:10,color:D.textMid,fontWeight:600}}>{k}</span>
+              <span style={{fontSize:13,color:D.textMid,fontWeight:600}}>{k}</span>
             </div>
           ))}
         </div>
@@ -1241,8 +1283,8 @@ function ScoringTab({data,weights,setWeights}) {
                 Campaign:Math.round(campaignScore(c)*normed.cam/100),
               }))} margin={{bottom:5}}>
                 <CartesianGrid strokeDasharray="3 3" stroke={D.border} vertical={false}/>
-                <XAxis dataKey="name" tick={{fontSize:9,fill:D.textMid,fontFamily:"JetBrains Mono"}} tickLine={false} axisLine={false}/>
-                <YAxis tick={{fontSize:9,fill:D.textLight}} tickLine={false} axisLine={false}/>
+                <XAxis dataKey="name" tick={{fontSize:11,fill:D.textMid,fontFamily:"JetBrains Mono"}} tickLine={false} axisLine={false}/>
+                <YAxis tick={{fontSize:11,fill:D.textLight}} tickLine={false} axisLine={false}/>
                 <Tooltip content={<CTip/>}/>
                 <Legend wrapperStyle={{fontSize:11}}/>
                 <Bar dataKey="SEO" stackId="a" fill={D.purple} radius={[0,0,0,0]}/>
@@ -1521,8 +1563,8 @@ function ContentIntelTab({data}) {
             <ResponsiveContainer width="100%" height={200}>
               <BarChart data={compBarD} layout="vertical" margin={{left:0,right:30}}>
                 <CartesianGrid strokeDasharray="3 3" stroke={D.border} horizontal={false}/>
-                <XAxis type="number" domain={[0,100]} tick={{fontSize:9,fill:D.textLight}} tickLine={false} axisLine={false}/>
-                <YAxis type="category" dataKey="name" tick={{fontSize:9,fill:D.textMid,fontFamily:"JetBrains Mono"}} tickLine={false} axisLine={false} width={32}/>
+                <XAxis type="number" domain={[0,100]} tick={{fontSize:11,fill:D.textLight}} tickLine={false} axisLine={false}/>
+                <YAxis type="category" dataKey="name" tick={{fontSize:11,fill:D.textMid,fontFamily:"JetBrains Mono"}} tickLine={false} axisLine={false} width={32}/>
                 <Tooltip content={<CTip/>}/>
                 <Bar dataKey="overall" name="Content Score" radius={[0,4,4,0]}>
                   {compBarD.map((d,i)=><Cell key={i} fill={d.home?D.yellow:D.pink} opacity={.85}/>)}
@@ -1650,73 +1692,148 @@ const TABS = [
 ];
 
 export default function App() {
-  const [activeTab,setActiveTab] = useState("how");
+  const [activeTab,setActiveTab] = useState("cmd");
   const [weights,setWeights] = useState({seo:25,cnt:25,soc:20,mkt:15,cam:15});
+  const [search,setSearch] = useState("");
+  const [activeGroup,setActiveGroup] = useState("overview");
+  const [compareMode,setCompareMode] = useState(false);
+  const [compareIds,setCompareIds] = useState([]);
+  const [viewMode,setViewMode] = useState("chart");
+
+  const filteredData = useMemo(()=>{
+    if(!search.trim()) return COMPANIES;
+    const q = search.toLowerCase();
+    return COMPANIES.filter(c=>c.name.toLowerCase().includes(q)||c.short.toLowerCase().includes(q)||c.type.toLowerCase().includes(q));
+  },[search]);
+
+  const handleExport = useCallback(()=>{
+    const headers = ["Rank","Firm","AUM","SEO","Content","Social","Martech","Campaign","Overall"];
+    const scored = [...COMPANIES].map(c=>({...c,overall:overallScore(c,weights)})).sort((a,b)=>b.overall-a.overall);
+    const rows = scored.map((c,i)=>[i+1,c.name,c.aum,seoScore(c),contentScore(c),socialScore(c),martechScore(c),campaignScore(c),c.overall]);
+    exportCSV("ci-platform-export.csv",headers,rows);
+  },[weights]);
+
+  const toggleCompare = (id) => {
+    setCompareIds(prev => prev.includes(id) ? prev.filter(x=>x!==id) : prev.length<3 ? [...prev,id] : prev);
+  };
+
+  const handleTabClick = (tabId) => {
+    setActiveTab(tabId);
+    const group = NAV_GROUPS.find(g=>g.tabs.includes(tabId));
+    if(group) setActiveGroup(group.id);
+  };
 
   const renderTab = () => {
+    const data = filteredData;
     switch(activeTab) {
       case "how": return <HowToUse/>;
-      case "cmd": return <CommandCenter data={COMPANIES} weights={weights}/>;
-      case "seo": return <SEOTab data={COMPANIES}/>;
-      case "cnt": return <ContentTab data={COMPANIES}/>;
-      case "soc": return <SocialTab data={COMPANIES}/>;
-      case "mkt": return <MartechTab data={COMPANIES}/>;
-      case "cam": return <CampaignTab data={COMPANIES}/>;
-      case "gap": return <GapTab data={COMPANIES}/>;
-      case "trn": return <TrendsTab data={COMPANIES}/>;
-      case "scr": return <ScoringTab data={COMPANIES} weights={weights} setWeights={setWeights}/>;
-      case "pro": return <ProfilesTab data={COMPANIES}/>;
-      case "rep": return <ContentIntelTab data={COMPANIES}/>;
+      case "cmd": return <CommandCenter data={data} weights={weights} compareMode={compareMode} compareIds={compareIds} toggleCompare={toggleCompare} viewMode={viewMode}/>;
+      case "seo": return <SEOTab data={data}/>;
+      case "cnt": return <ContentTab data={data}/>;
+      case "soc": return <SocialTab data={data}/>;
+      case "mkt": return <MartechTab data={data}/>;
+      case "cam": return <CampaignTab data={data}/>;
+      case "gap": return <GapTab data={data}/>;
+      case "trn": return <TrendsTab data={data}/>;
+      case "scr": return <ScoringTab data={data} weights={weights} setWeights={setWeights}/>;
+      case "pro": return <ProfilesTab data={data}/>;
+      case "rep": return <ContentIntelTab data={data}/>;
       default: return null;
     }
   };
 
   const activeInfo = TABS.find(t=>t.id===activeTab);
+  const currentGroupTabs = NAV_GROUPS.find(g=>g.id===activeGroup)?.tabs||[];
 
   return (
     <>
       <GS/>
       <div style={{minHeight:"100vh",background:D.page,fontFamily:"Mulish,sans-serif"}}>
-        {/* Top nav */}
+        {/* Top nav — v10 grouped navigation */}
         <div style={{background:D.navBg,position:"sticky",top:0,zIndex:100,
           boxShadow:"0 2px 20px rgba(0,0,0,.25)"}}>
-          {/* Brand row */}
+          {/* Brand row + search + export */}
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
-            padding:"12px 20px 0",maxWidth:1600,margin:"0 auto"}}>
+            padding:"10px 20px 0",maxWidth:1600,margin:"0 auto"}}>
             <div style={{display:"flex",alignItems:"center",gap:12}}>
               <div style={{width:32,height:32,borderRadius:10,background:"rgba(255,255,255,.2)",
-                display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>🏆</div>
+                display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}} aria-hidden="true">🏆</div>
               <div>
                 <div style={{fontFamily:"Outfit",fontWeight:800,fontSize:16,color:"white",lineHeight:1}}>
-                  Competitive Intelligence Platform
+                  CI Platform <span style={{fontWeight:400,fontSize:13,opacity:.7}}>v10</span>
                 </div>
-                <div style={{fontSize:10,color:"rgba(255,255,255,.6)",marginTop:2}}>
-                  18 Firms · 5 Dimensions · Q1 2026 · Digital Strategy
+                <div style={{fontSize:13,color:"rgba(255,255,255,.6)",marginTop:2}}>
+                  18 Firms · 5 Dimensions · Q1 2026
                 </div>
               </div>
             </div>
-            <div style={{display:"flex",gap:8}}>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              {/* Global Search */}
+              <div style={{position:"relative"}}>
+                <input value={search} onChange={e=>setSearch(e.target.value)}
+                  placeholder="Search firms…"
+                  aria-label="Search firms"
+                  style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.2)",
+                    borderRadius:8,padding:"6px 12px 6px 30px",fontSize:13,color:"white",width:180,
+                    fontFamily:"Mulish,sans-serif"}}/>
+                <span style={{position:"absolute",left:10,top:"50%",transform:"translateY(-50%)",fontSize:14,opacity:.6}}>🔍</span>
+              </div>
+              {/* Export */}
+              <button onClick={handleExport} aria-label="Export data as CSV"
+                style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.2)",
+                  borderRadius:8,padding:"6px 12px",fontSize:13,color:"white",cursor:"pointer",
+                  fontFamily:"Mulish,sans-serif",fontWeight:600,display:"flex",alignItems:"center",gap:4}}>
+                📥 Export
+              </button>
+              {/* Compare toggle */}
+              <button onClick={()=>{setCompareMode(!compareMode);if(compareMode)setCompareIds([]);}}
+                aria-label={compareMode?"Exit compare mode":"Enter compare mode"}
+                style={{background:compareMode?"rgba(16,185,129,.3)":"rgba(255,255,255,.15)",
+                  border:`1px solid ${compareMode?"rgba(16,185,129,.5)":"rgba(255,255,255,.2)"}`,
+                  borderRadius:8,padding:"6px 12px",fontSize:13,color:"white",cursor:"pointer",
+                  fontFamily:"Mulish,sans-serif",fontWeight:600,display:"flex",alignItems:"center",gap:4}}>
+                {compareMode?"✓ Comparing":"⇔ Compare"}
+              </button>
               <Pill col="rgba(255,255,255,.9)" bg="rgba(255,255,255,.15)" style={{border:"none"}}>
                 CONFIDENTIAL
               </Pill>
-              <Pill col="rgba(255,255,255,.9)" bg="rgba(255,255,255,.15)" style={{border:"none"}}>
-                Q1 2026
-              </Pill>
             </div>
           </div>
-          {/* Tab row */}
-          <div style={{display:"flex",overflowX:"auto",padding:"8px 20px 0",maxWidth:1600,margin:"0 auto",
-            gap:2,scrollbarWidth:"none"}}>
-            {TABS.map(t=>{
-              const active=activeTab===t.id;
+          {/* Group row */}
+          <div className="nav-groups" style={{display:"flex",padding:"8px 20px 0",maxWidth:1600,margin:"0 auto",gap:4}}>
+            {NAV_GROUPS.map(g=>{
+              const isActive = activeGroup===g.id;
               return (
-                <button key={t.id} onClick={()=>setActiveTab(t.id)}
-                  style={{padding:"8px 14px",background:active?"rgba(255,255,255,.95)":D.navHover,
+                <button key={g.id} onClick={()=>{setActiveGroup(g.id);setActiveTab(g.tabs[0]);}}
+                  role="tab" aria-selected={isActive} tabIndex={0}
+                  onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();setActiveGroup(g.id);setActiveTab(g.tabs[0]);}}}
+                  style={{padding:"7px 16px",background:isActive?"rgba(255,255,255,.18)":"transparent",
                     border:"none",borderRadius:"8px 8px 0 0",cursor:"pointer",whiteSpace:"nowrap",
-                    color:active?D.purple:"rgba(255,255,255,.8)",
-                    fontFamily:"Mulish,sans-serif",fontWeight:active?700:500,fontSize:12,
+                    color:isActive?"white":"rgba(255,255,255,.6)",
+                    fontFamily:"Outfit,sans-serif",fontWeight:isActive?700:500,fontSize:14,
+                    transition:"all .14s",flexShrink:0,display:"flex",alignItems:"center",gap:6}}>
+                  <span aria-hidden="true">{g.icon}</span> {g.label}
+                </button>
+              );
+            })}
+          </div>
+          {/* Sub-tab row */}
+          <div className="nav-tabs" style={{display:"flex",overflowX:"auto",padding:"0 20px",maxWidth:1600,margin:"0 auto",
+            gap:2,scrollbarWidth:"none",background:"rgba(0,0,0,.1)"}}>
+            {currentGroupTabs.map(tid=>{
+              const t = TABS.find(x=>x.id===tid);
+              if(!t) return null;
+              const active=activeTab===tid;
+              return (
+                <button key={tid} onClick={()=>setActiveTab(tid)}
+                  role="tab" aria-selected={active} tabIndex={0}
+                  onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();setActiveTab(tid);}}}
+                  style={{padding:"8px 16px",background:active?"rgba(255,255,255,.95)":"transparent",
+                    border:"none",borderRadius:"8px 8px 0 0",cursor:"pointer",whiteSpace:"nowrap",
+                    color:active?D.purple:"rgba(255,255,255,.75)",
+                    fontFamily:"Mulish,sans-serif",fontWeight:active?700:500,fontSize:13,
                     transition:"all .14s",flexShrink:0}}>
-                  <span style={{marginRight:5}}>{t.icon}</span>
+                  <span style={{marginRight:5}} aria-hidden="true">{t.icon}</span>
                   {t.label}
                 </button>
               );
@@ -1725,11 +1842,72 @@ export default function App() {
         </div>
         {/* Content area */}
         <div style={{maxWidth:1600,margin:"0 auto",padding:"24px 20px 40px"}}>
-          {/* Page header */}
-          <div style={{marginBottom:20,display:"flex",alignItems:"center",gap:10}}>
-            <span style={{fontSize:20}}>{activeInfo?.icon}</span>
-            <h1 style={{fontFamily:"Outfit",fontWeight:800,fontSize:24,color:D.text}}>{activeInfo?.label}</h1>
+          {/* Page header + view mode + compare info */}
+          <div style={{marginBottom:20,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:20}} aria-hidden="true">{activeInfo?.icon}</span>
+              <h1 style={{fontFamily:"Outfit",fontWeight:800,fontSize:24,color:D.text}}>{activeInfo?.label}</h1>
+              {search && <Pill col={D.teal}>{filteredData.length} of {COMPANIES.length} firms</Pill>}
+            </div>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              {activeTab==="cmd" && (
+                <div style={{display:"flex",gap:2,background:D.border,borderRadius:8,padding:2}}>
+                  {["chart","table"].map(m=>(
+                    <button key={m} onClick={()=>setViewMode(m)}
+                      style={{padding:"5px 12px",borderRadius:6,border:"none",cursor:"pointer",fontSize:13,
+                        fontWeight:600,background:viewMode===m?D.white:"transparent",
+                        color:viewMode===m?D.purple:D.textMid,fontFamily:"Mulish,sans-serif"}}>
+                      {m==="chart"?"📊 Chart":"📋 Table"}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {compareMode && (
+                <Pill col={D.green} bg={D.greenLight}>
+                  {compareIds.length}/3 selected
+                </Pill>
+              )}
+            </div>
           </div>
+          {/* Compare panel */}
+          {compareMode && compareIds.length>=2 && (
+            <Card style={{marginBottom:20,border:`2px solid ${D.green}`}}>
+              <SectionHead title="Firm Comparison" sub={`Comparing ${compareIds.length} firms side-by-side`}
+                action={<button onClick={()=>{setCompareMode(false);setCompareIds([]);}} style={{background:D.redLight,color:D.red,border:"none",borderRadius:8,padding:"5px 12px",fontSize:13,fontWeight:600,cursor:"pointer"}}>✕ Close</button>}/>
+              <div style={{display:"grid",gridTemplateColumns:`repeat(${compareIds.length},1fr)`,gap:16,marginBottom:16}}>
+                {compareIds.map(id=>{const c=COMPANIES.find(x=>x.id===id);if(!c)return null;return(
+                  <div key={id} style={{textAlign:"center",padding:16,background:D.cardAlt,borderRadius:12,border:`1px solid ${D.border}`}}>
+                    <div style={{width:12,height:12,borderRadius:"50%",background:c.col,margin:"0 auto 8px"}}/>
+                    <div style={{fontFamily:"Outfit",fontWeight:700,fontSize:15,color:D.text,marginBottom:4}}>{c.name}</div>
+                    <div style={{fontSize:13,color:D.textMid,marginBottom:8}}>{c.aum} · {c.type}</div>
+                    <div style={{display:"flex",justifyContent:"center",gap:6,flexWrap:"wrap"}}>
+                      {[{l:"SEO",v:seoScore(c)},{l:"Content",v:contentScore(c)},{l:"Social",v:socialScore(c)},{l:"Martech",v:martechScore(c)},{l:"Campaign",v:campaignScore(c)},{l:"Overall",v:overallScore(c,weights)}].map(d=>(
+                        <div key={d.l} style={{textAlign:"center"}}>
+                          <ScoreBadge val={d.v} size={13}/>
+                          <div style={{fontSize:11,color:D.textLight,marginTop:2}}>{d.l}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );})}
+              </div>
+              <ResponsiveContainer width="100%" height={260}>
+                <RadarChart data={[{dim:"SEO"},{dim:"Content"},{dim:"Social"},{dim:"Martech"},{dim:"Campaign"}].map(d=>{
+                  const row={dim:d.dim};
+                  compareIds.forEach(id=>{const c=COMPANIES.find(x=>x.id===id);if(c){
+                    row[c.short]=d.dim==="SEO"?seoScore(c):d.dim==="Content"?contentScore(c):d.dim==="Social"?socialScore(c):d.dim==="Martech"?martechScore(c):campaignScore(c);
+                  }});return row;
+                })}>
+                  <PolarGrid stroke={D.border}/><PolarAngleAxis dataKey="dim" tick={{fontSize:13,fill:D.textMid,fontWeight:600}}/>
+                  <PolarRadiusAxis domain={[0,100]} tick={false} axisLine={false}/>
+                  {compareIds.map((id,i)=>{const c=COMPANIES.find(x=>x.id===id);return c?(
+                    <Radar key={id} name={c.short} dataKey={c.short} stroke={D.chart[i]} fill={D.chart[i]} fillOpacity={.15} strokeWidth={2}/>
+                  ):null;})}
+                  <Legend wrapperStyle={{fontSize:13}}/>
+                </RadarChart>
+              </ResponsiveContainer>
+            </Card>
+          )}
           {renderTab()}
         </div>
       </div>
